@@ -1,0 +1,10 @@
+.env
+*.log
+*.tmp
+
+# Rendered config (generated from the template by `provision`)
+adguardhome/AdGuardHome.yaml
+
+# Personal config-as-code override (your real upstreams/rules/rewrites).
+# `provision` uses this instead of the committed example when present.
+adguardhome/AdGuardHome.local.tmpl

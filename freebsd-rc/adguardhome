@@ -1,0 +1,66 @@
+#!/bin/sh
+#
+# PROVIDE: adguardhome
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+#
+# daemon(8)-free rc script for AdGuard Home in an iocage jail.
+#
+# Why: in this iocage jail (TrueNAS CORE 13.x) /usr/sbin/daemon is broken --
+# its output redirection does not work and supervised processes do not stay up
+# (even `daemon -o file echo hi` produces an empty file). Both the AdGuard
+# self-installer rc script and the FreeBSD port rc script rely on daemon(8) and
+# therefore fail. A plain background launch works fine, so we do exactly that
+# and track the PID ourselves.
+
+. /etc/rc.subr
+
+name=adguardhome
+rcvar=adguardhome_enable
+
+load_rc_config $name
+: ${adguardhome_enable:=no}
+: ${adguardhome_bin:=/usr/local/bin/adguardhome}
+: ${adguardhome_config:=/usr/local/etc/adguardhome/AdGuardHome.yaml}
+: ${adguardhome_workdir:=/var/db/adguardhome}
+: ${adguardhome_log:=/var/log/adguardhome.log}
+
+pidfile="/var/run/${name}.pid"
+start_cmd="adguardhome_start"
+stop_cmd="adguardhome_stop"
+status_cmd="adguardhome_status"
+
+adguardhome_running() {
+    [ -f "$pidfile" ] && kill -0 "$(cat "$pidfile")" 2>/dev/null
+}
+
+adguardhome_start() {
+    if adguardhome_running; then
+        echo "$name already running (pid $(cat "$pidfile"))."
+        return 0
+    fi
+    # Ensure config dir and work dir exist (the pkg rc prestart used to do this)
+    [ -d "$(dirname "${adguardhome_config}")" ] || mkdir -p "$(dirname "${adguardhome_config}")"
+    [ -d "${adguardhome_workdir}" ] || mkdir -p "${adguardhome_workdir}"
+    echo "Starting $name."
+    ${adguardhome_bin} -c "${adguardhome_config}" -w "${adguardhome_workdir}" --no-check-update >> "${adguardhome_log}" 2>&1 &
+    echo $! > "$pidfile"
+}
+
+adguardhome_stop() {
+    if adguardhome_running; then
+        echo "Stopping $name."
+        kill "$(cat "$pidfile")" 2>/dev/null
+    fi
+    rm -f "$pidfile"
+}
+
+adguardhome_status() {
+    if adguardhome_running; then
+        echo "$name is running as pid $(cat "$pidfile")."
+    else
+        echo "$name is not running."
+    fi
+}
+
+run_rc_command "$1"
