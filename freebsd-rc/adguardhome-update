@@ -1,0 +1,36 @@
+#!/bin/sh
+# Update the AdGuard Home package inside the jail.
+#
+# `pkg upgrade adguardhome` overwrites /usr/local/etc/rc.d/adguardhome with the
+# port's daemon(8)-based rc script, which does not work in this iocage jail. So
+# after an actual upgrade we restore the daemon-free rc from a pristine copy
+# that `setup-adguard-jail.sh create` stored next to the config.
+#
+# Run by cron (see /etc/crontab) and by `setup-adguard-jail.sh update`.
+set -e
+
+PRISTINE_RC=/usr/local/etc/adguardhome/adguardhome.rc
+ACTIVE_RC=/usr/local/etc/rc.d/adguardhome
+
+echo "=== adguardhome-update $(date '+%Y-%m-%d %H:%M:%S') ==="
+
+before="$(pkg query %v adguardhome 2>/dev/null || echo none)"
+pkg update -f >/dev/null 2>&1 || true
+pkg upgrade -y adguardhome
+after="$(pkg query %v adguardhome 2>/dev/null || echo none)"
+
+if [ "$before" = "$after" ]; then
+    echo "adguardhome already up to date ($after)"
+    exit 0
+fi
+
+echo "upgraded adguardhome: $before -> $after"
+
+# Restore the daemon-free rc that pkg just clobbered, then restart.
+if [ -f "$PRISTINE_RC" ]; then
+    cp "$PRISTINE_RC" "$ACTIVE_RC"
+    chmod 555 "$ACTIVE_RC"
+fi
+service adguardhome restart || true
+sleep 2
+sockstat -4 -l | grep -i adguard || echo "WARN: adguardhome not listening after update"

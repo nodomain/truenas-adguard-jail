@@ -173,6 +173,7 @@ the template and re-run `provision` to change settings.
 ```bash
 ./setup-adguard-jail.sh create     # create jail + install AdGuard (idempotent)
 ./setup-adguard-jail.sh provision  # render config template + deploy into the jail
+./setup-adguard-jail.sh update     # update the AdGuard package now (pkg + rc restore)
 ./setup-adguard-jail.sh status     # jail + AdGuard service status
 ./setup-adguard-jail.sh logs       # tail AdGuard logs
 ./setup-adguard-jail.sh destroy    # stop + destroy jail (rollback / clean retry)
@@ -213,6 +214,24 @@ scripts/nas-jail-restart.py             # restart the jail
 
 > Prefer the wizard instead? Skip `provision` and open `http://<JAIL_IP>:3000`
 > to configure AdGuard by hand.
+
+## Updating
+
+AdGuard Home is installed from `pkg`, so updates come from the FreeBSD package
+repo (which can trail upstream AdGuard releases). The built-in AdGuard updater is
+disabled on purpose (`--no-check-update`).
+
+**The catch:** `pkg upgrade adguardhome` overwrites the daemon-free rc script
+with the port's `daemon(8)`-based one, which doesn't work in this jail. The
+bundled updater (`freebsd-rc/adguardhome-update`, deployed by `create` to
+`/usr/local/sbin/adguardhome-update`) handles this: it upgrades the package and,
+**only if the version actually changed**, restores the daemon-free rc and
+restarts the service.
+
+- **On demand:** `./setup-adguard-jail.sh update`
+- **Automatic:** `create` installs a cron job in the jail that runs the updater
+  on `AUTO_UPDATE_SCHEDULE` (default weekly, Sunday 04:00; set empty in `.env` to
+  disable). Output is logged to `/var/log/adguardhome-update.log` in the jail.
 
 ## Reliability note
 

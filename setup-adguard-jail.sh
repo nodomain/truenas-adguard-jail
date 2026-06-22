@@ -41,6 +41,10 @@ load_env() {
     # hash already stored in the jail (so re-provisioning keeps the same login).
     : "${ADGUARD_ADMIN_USER:=admin}"
     : "${ADGUARD_ADMIN_PASSWORD:=}"
+
+    # In-jail cron schedule for automatic `pkg` updates of AdGuard Home.
+    # Standard crontab 5-field format. Empty string disables the cron job.
+    : "${AUTO_UPDATE_SCHEDULE:=0 4 * * 0}"
 }
 
 TEMPLATE_FILE="${SCRIPT_DIR}/adguardhome/AdGuardHome.yaml.tmpl"
@@ -87,6 +91,8 @@ BRIDGE="${BRIDGE}"
 RELEASE="${JAIL_RELEASE}"
 RC_B64="${RC_B64}"
 RCLOCAL_B64="${RCLOCAL_B64}"
+UPDATE_B64="${UPDATE_B64}"
+SCHED="${AUTO_UPDATE_SCHEDULE}"
 
 echo "[remote] iocage release check..."
 if ! iocage list -r | grep -q "\${RELEASE}"; then
@@ -144,6 +150,25 @@ chmod 755 "\${JAIL_ROOT}/etc/rc.local"
 iocage exec "\${JAIL_NAME}" sh -c 'grep -q "auto_linklocal=1" /etc/sysctl.conf 2>/dev/null || echo "net.inet6.ip6.auto_linklocal=1" >> /etc/sysctl.conf'
 iocage exec "\${JAIL_NAME}" sh /etc/rc.local || true
 
+echo "[remote] installing pkg-update script + cron..."
+# Pristine copy of the daemon-free rc; the updater restores it after a pkg upgrade.
+cp "\${JAIL_ROOT}/usr/local/etc/rc.d/adguardhome" "\${JAIL_ROOT}/usr/local/etc/adguardhome/adguardhome.rc"
+mkdir -p "\${JAIL_ROOT}/usr/local/sbin"
+echo "\${UPDATE_B64}" | openssl base64 -d -A > "\${JAIL_ROOT}/usr/local/sbin/adguardhome-update"
+chmod 555 "\${JAIL_ROOT}/usr/local/sbin/adguardhome-update"
+
+# (Re)install the cron entry in the jail's system crontab. Empty schedule = remove it.
+CRONTAB="\${JAIL_ROOT}/etc/crontab"
+sed -i '' '/adguardhome-update/d' "\${CRONTAB}" 2>/dev/null || true
+if [ -n "\${SCHED}" ]; then
+    echo "\${SCHED} root /usr/local/sbin/adguardhome-update >> /var/log/adguardhome-update.log 2>&1" >> "\${CRONTAB}"
+    iocage exec "\${JAIL_NAME}" sysrc cron_enable=YES >/dev/null 2>&1 || true
+    iocage exec "\${JAIL_NAME}" service cron start >/dev/null 2>&1 || iocage exec "\${JAIL_NAME}" service cron restart >/dev/null 2>&1 || true
+    echo "[remote] auto-update cron installed: \${SCHED}"
+else
+    echo "[remote] auto-update cron disabled (AUTO_UPDATE_SCHEDULE empty)"
+fi
+
 echo "[remote] enabling + starting service..."
 iocage exec "\${JAIL_NAME}" sysrc adguardhome_enable=YES
 iocage exec "\${JAIL_NAME}" service adguardhome restart || true
@@ -156,15 +181,19 @@ REMOTE
 
 cmd_create() {
     log_step "Deploying AdGuard jail '${JAIL_NAME}' (${JAIL_IP}) to ${TRUENAS_HOST}"
-    local payload remote_path RC_B64 RCLOCAL_B64
+    local payload remote_path RC_B64 RCLOCAL_B64 UPDATE_B64
     if [[ ! -f "${SCRIPT_DIR}/freebsd-rc/adguardhome" ]]; then
         log_error "freebsd-rc/adguardhome not found"; exit 1
     fi
     if [[ ! -f "${SCRIPT_DIR}/freebsd-rc/rc.local" ]]; then
         log_error "freebsd-rc/rc.local not found"; exit 1
     fi
+    if [[ ! -f "${SCRIPT_DIR}/freebsd-rc/adguardhome-update" ]]; then
+        log_error "freebsd-rc/adguardhome-update not found"; exit 1
+    fi
     RC_B64="$(base64 < "${SCRIPT_DIR}/freebsd-rc/adguardhome" | tr -d '\n')"
     RCLOCAL_B64="$(base64 < "${SCRIPT_DIR}/freebsd-rc/rc.local" | tr -d '\n')"
+    UPDATE_B64="$(base64 < "${SCRIPT_DIR}/freebsd-rc/adguardhome-update" | tr -d '\n')"
     payload="$(mktemp)"
     remote_path="/tmp/adguard-jail-payload.sh"
     generate_payload > "$payload"
@@ -295,6 +324,13 @@ cmd_logs() {
     ssh_sudo "iocage exec ${JAIL_NAME} 'tail -n 50 /var/log/adguardhome.log 2>/dev/null || echo no-logs-yet'"
 }
 
+cmd_update() {
+    log_step "Updating AdGuard Home package in jail '${JAIL_NAME}' on ${TRUENAS_HOST}"
+    log_info "Running the in-jail updater (enter your sudo password when prompted)..."
+    log_info "(If it reports 'No such file', run 'create' once to deploy the updater.)"
+    ssh_sudo "iocage exec ${JAIL_NAME} /usr/local/sbin/adguardhome-update"
+}
+
 cmd_destroy() {
     log_warn "This will STOP and DESTROY the jail '${JAIL_NAME}' (AdGuard config is lost)."
     read -r -p "Type the jail name to confirm: " confirm
@@ -310,9 +346,13 @@ Usage: $0 <command>
 Commands:
   create     Create the jail + install AdGuard Home (idempotent)
   provision  Render the config template and deploy it into the jail
+  update     Update the AdGuard Home package now (pkg upgrade + rc restore)
   status     Show jail + AdGuard service status
   logs       Tail AdGuard logs inside the jail
   destroy    Stop and destroy the jail (for rollback / clean retry)
+
+The jail also auto-updates via cron (AUTO_UPDATE_SCHEDULE in .env; default
+weekly). Set it empty to disable.
 
 Config comes from .env (see .env.example). Requires SSH access to the NAS as
 SSH_USER with sudo rights. iocage runs as root via sudo.
@@ -324,6 +364,7 @@ main() {
     case "${1:-}" in
         create)    cmd_create ;;
         provision) cmd_provision ;;
+        update)    cmd_update ;;
         status)    cmd_status ;;
         logs)    cmd_logs ;;
         destroy) cmd_destroy ;;

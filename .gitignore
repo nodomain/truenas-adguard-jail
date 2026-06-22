@@ -2,6 +2,10 @@
 *.log
 *.tmp
 
+# Python bytecode cache (from running the scripts/*.py helpers)
+__pycache__/
+*.pyc
+
 # Rendered config (generated from the template by `provision`)
 adguardhome/AdGuardHome.yaml
 
