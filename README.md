@@ -159,9 +159,10 @@ $EDITOR adguardhome/AdGuardHome.local.tmpl   # set your upstreams, rules, rewrit
 ```
 
 The template covers upstreams (incl. conditional/per-domain forwarding),
-blocklists, custom allow/block `user_rules`, DNS rewrites, blocked services,
-DNSSEC, EDNS client subnet, blocking mode, query-log/stats retention, and a 4 MB
-DNS cache.
+blocklists (defaults to HaGeZi Multi PRO + a threat-intelligence feed, with
+annoyance/anti-bypass/NRD lists included but disabled), custom allow/block
+`user_rules`, DNS rewrites, blocked services, DNSSEC, EDNS client subnet,
+blocking mode, query-log/stats retention, and a 4 MB DNS cache.
 
 `provision` renders the chosen template (substituting `@@ADMIN_USER@@` /
 `@@ADMIN_PWHASH@@`), deploys it to `/usr/local/etc/adguardhome/AdGuardHome.yaml`

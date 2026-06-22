@@ -130,20 +130,35 @@ statistics:
   interval: 2160h
   enabled: true
   ignored_enabled: false
-# EXAMPLE blocklists. Add/enable the lists you want.
+# Blocklists: one curated all-in-one (HaGeZi Multi PRO) + a threat feed. The
+# extra lists are disabled by default — flip enabled: true to use them.
 filters:
+  # All-in-one: ads, tracking, telemetry, phishing, malware, scam, cryptojacking,
+  # and error trackers (Bugsnag/Crashlytics/Sentry). Balanced, low false-positives.
   - enabled: true
-    url: https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt
-    name: AdGuard DNS filter
-    id: 1
+    url: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/pro.txt
+    name: HaGeZi Multi PRO
+    id: 1800000001
+  # Dedicated malware/phishing/scam threat intelligence feed.
   - enabled: true
-    url: https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_3_Spyware/filter.txt
-    name: AdGuard Tracking Protection
-    id: 1674258493
+    url: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt
+    name: HaGeZi Threat Intelligence Feeds (medium)
+    id: 1800000002
+  # Cookie banners / annoyances.
   - enabled: false
-    url: https://adguardteam.github.io/HostlistsRegistry/assets/filter_33.txt
-    name: Steven Black's List
-    id: 1754570959
+    url: https://raw.githubusercontent.com/AdguardTeam/FiltersRegistry/master/filters/filter_14_Annoyances/filter.txt
+    name: AdGuard Annoyances Filter
+    id: 1674258494
+  # Stop clients bypassing your DNS via encrypted DNS / VPN / proxy / TOR.
+  - enabled: false
+    url: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/doh-vpn-proxy-bypass.txt
+    name: HaGeZi Encrypted DNS/VPN/Proxy Bypass
+    id: 1800000003
+  # Newly registered domains (last 7 days) - favoured by attackers. Higher FP risk.
+  - enabled: false
+    url: https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/nrd7.txt
+    name: HaGeZi NRD (last 7 days)
+    id: 1800000004
 whitelist_filters: []
 # EXAMPLE custom rules. AdGuard rule syntax:
 #   ||ads.example.com^            block a domain
