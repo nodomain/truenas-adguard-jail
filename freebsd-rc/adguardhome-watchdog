@@ -1,0 +1,29 @@
+#!/bin/sh
+# adguardhome-watchdog: restart AdGuard Home if its process has died.
+#
+# The daemon(8)-free rc script (see freebsd-rc/adguardhome) launches AdGuard in
+# the background and only tracks its PID -- it does NOT supervise it. So if the
+# process dies (e.g. the host OOM-killer reclaims it under memory pressure, which
+# has happened on this box), DNS for the whole LAN stays down until someone
+# restarts it. This watchdog, run by cron every minute, brings it back within
+# ~1 minute regardless of why it died.
+#
+# Run by cron (see /etc/crontab). Idempotent and cheap: it does nothing while the
+# process is alive.
+
+PIDFILE=/var/run/adguardhome.pid
+LOG=/var/log/adguardhome-watchdog.log
+
+# Alive? (same check the rc script uses)
+if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
+    exit 0
+fi
+
+echo "$(date '+%Y-%m-%d %H:%M:%S') adguardhome not running -- restarting" >> "$LOG"
+service adguardhome start >> "$LOG" 2>&1
+sleep 2
+if sockstat -4 -l 2>/dev/null | grep -qi adguard; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') adguardhome back up" >> "$LOG"
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') WARN: adguardhome still not listening" >> "$LOG"
+fi

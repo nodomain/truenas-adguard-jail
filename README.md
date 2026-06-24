@@ -234,6 +234,20 @@ restarts the service.
   on `AUTO_UPDATE_SCHEDULE` (default weekly, Sunday 04:00; set empty in `.env` to
   disable). Output is logged to `/var/log/adguardhome-update.log` in the jail.
 
+## Self-healing watchdog
+
+The daemon-free rc script launches AdGuard in the background but does **not**
+supervise it. If the process dies — e.g. the host's **OOM-killer** reclaims it
+under memory pressure (seen on this NAS) — DNS for the whole LAN stays down until
+someone restarts it. `create` therefore installs
+[`freebsd-rc/adguardhome-watchdog`](freebsd-rc/adguardhome-watchdog) to
+`/usr/local/sbin/` and a cron entry that checks every minute and restarts AdGuard
+if its PID is gone (logged to `/var/log/adguardhome-watchdog.log`). It is a cheap
+no-op while the process is alive.
+
+Schedule via `WATCHDOG_SCHEDULE` in `.env` (default `* * * * *` = every minute;
+set empty to disable).
+
 ## Reliability note
 
 DNS is critical infrastructure: if the NAS reboots, name resolution for the

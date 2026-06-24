@@ -45,6 +45,11 @@ load_env() {
     # In-jail cron schedule for automatic `pkg` updates of AdGuard Home.
     # Standard crontab 5-field format. Empty string disables the cron job.
     : "${AUTO_UPDATE_SCHEDULE:=0 4 * * 0}"
+
+    # In-jail cron schedule for the watchdog that restarts AdGuard Home if its
+    # process has died (the daemon-free rc script does not supervise it; the host
+    # OOM-killer can reclaim it). Standard crontab format; empty string disables.
+    : "${WATCHDOG_SCHEDULE:=* * * * *}"
 }
 
 TEMPLATE_FILE="${SCRIPT_DIR}/adguardhome/AdGuardHome.yaml.tmpl"
@@ -92,7 +97,9 @@ RELEASE="${JAIL_RELEASE}"
 RC_B64="${RC_B64}"
 RCLOCAL_B64="${RCLOCAL_B64}"
 UPDATE_B64="${UPDATE_B64}"
+WATCHDOG_B64="${WATCHDOG_B64}"
 SCHED="${AUTO_UPDATE_SCHEDULE}"
+WSCHED="${WATCHDOG_SCHEDULE}"
 
 echo "[remote] iocage release check..."
 if ! iocage list -r | grep -q "\${RELEASE}"; then
@@ -157,16 +164,33 @@ mkdir -p "\${JAIL_ROOT}/usr/local/sbin"
 echo "\${UPDATE_B64}" | openssl base64 -d -A > "\${JAIL_ROOT}/usr/local/sbin/adguardhome-update"
 chmod 555 "\${JAIL_ROOT}/usr/local/sbin/adguardhome-update"
 
-# (Re)install the cron entry in the jail's system crontab. Empty schedule = remove it.
+# Watchdog: restarts AdGuard if its process dies (no supervision in the rc; the
+# host OOM-killer can reclaim it). Deployed to /usr/local/sbin and run by cron.
+echo "\${WATCHDOG_B64}" | openssl base64 -d -A > "\${JAIL_ROOT}/usr/local/sbin/adguardhome-watchdog"
+chmod 555 "\${JAIL_ROOT}/usr/local/sbin/adguardhome-watchdog"
+
+# (Re)install the cron entries in the jail's system crontab. Empty schedule = remove.
 CRONTAB="\${JAIL_ROOT}/etc/crontab"
 sed -i '' '/adguardhome-update/d' "\${CRONTAB}" 2>/dev/null || true
+sed -i '' '/adguardhome-watchdog/d' "\${CRONTAB}" 2>/dev/null || true
+NEED_CRON=0
 if [ -n "\${SCHED}" ]; then
     echo "\${SCHED} root /usr/local/sbin/adguardhome-update >> /var/log/adguardhome-update.log 2>&1" >> "\${CRONTAB}"
-    iocage exec "\${JAIL_NAME}" sysrc cron_enable=YES >/dev/null 2>&1 || true
-    iocage exec "\${JAIL_NAME}" service cron start >/dev/null 2>&1 || iocage exec "\${JAIL_NAME}" service cron restart >/dev/null 2>&1 || true
+    NEED_CRON=1
     echo "[remote] auto-update cron installed: \${SCHED}"
 else
     echo "[remote] auto-update cron disabled (AUTO_UPDATE_SCHEDULE empty)"
+fi
+if [ -n "\${WSCHED}" ]; then
+    echo "\${WSCHED} root /usr/local/sbin/adguardhome-watchdog" >> "\${CRONTAB}"
+    NEED_CRON=1
+    echo "[remote] watchdog cron installed: \${WSCHED}"
+else
+    echo "[remote] watchdog cron disabled (WATCHDOG_SCHEDULE empty)"
+fi
+if [ "\${NEED_CRON}" = "1" ]; then
+    iocage exec "\${JAIL_NAME}" sysrc cron_enable=YES >/dev/null 2>&1 || true
+    iocage exec "\${JAIL_NAME}" service cron start >/dev/null 2>&1 || iocage exec "\${JAIL_NAME}" service cron restart >/dev/null 2>&1 || true
 fi
 
 echo "[remote] enabling + starting service..."
@@ -181,7 +205,7 @@ REMOTE
 
 cmd_create() {
     log_step "Deploying AdGuard jail '${JAIL_NAME}' (${JAIL_IP}) to ${TRUENAS_HOST}"
-    local payload remote_path RC_B64 RCLOCAL_B64 UPDATE_B64
+    local payload remote_path RC_B64 RCLOCAL_B64 UPDATE_B64 WATCHDOG_B64
     if [[ ! -f "${SCRIPT_DIR}/freebsd-rc/adguardhome" ]]; then
         log_error "freebsd-rc/adguardhome not found"; exit 1
     fi
@@ -191,9 +215,13 @@ cmd_create() {
     if [[ ! -f "${SCRIPT_DIR}/freebsd-rc/adguardhome-update" ]]; then
         log_error "freebsd-rc/adguardhome-update not found"; exit 1
     fi
+    if [[ ! -f "${SCRIPT_DIR}/freebsd-rc/adguardhome-watchdog" ]]; then
+        log_error "freebsd-rc/adguardhome-watchdog not found"; exit 1
+    fi
     RC_B64="$(base64 < "${SCRIPT_DIR}/freebsd-rc/adguardhome" | tr -d '\n')"
     RCLOCAL_B64="$(base64 < "${SCRIPT_DIR}/freebsd-rc/rc.local" | tr -d '\n')"
     UPDATE_B64="$(base64 < "${SCRIPT_DIR}/freebsd-rc/adguardhome-update" | tr -d '\n')"
+    WATCHDOG_B64="$(base64 < "${SCRIPT_DIR}/freebsd-rc/adguardhome-watchdog" | tr -d '\n')"
     payload="$(mktemp)"
     remote_path="/tmp/adguard-jail-payload.sh"
     generate_payload > "$payload"
